@@ -1,0 +1,145 @@
+#include <windows.h>
+#include <tlhelp32.h>
+#include <tchar.h>
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <string>
+
+using namespace std;
+using namespace chrono;
+
+string userPassword;
+bool isTimerRunning = false;
+int countdownMinutes = 30;
+
+bool isMinecraftRunning() {
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap == INVALID_HANDLE_VALUE) return false;
+
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+
+    if (Process32First(hSnap, &pe)) {
+        do {
+            if (_tcsicmp(pe.szExeFile, _T("javaw.exe")) == 0) {
+                CloseHandle(hSnap);
+                return true;
+            }
+        } while (Process32Next(hSnap, &pe));
+    }
+    CloseHandle(hSnap);
+    return false;
+}
+
+// GUI 密碼鎖視窗（簡化）
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    static HWND hEdit, hButton;
+    switch (msg) {
+    case WM_CREATE: {
+        CreateWindowA("STATIC", "⏳ 時間到！請輸入密碼解鎖：",
+            WS_CHILD | WS_VISIBLE | SS_CENTER,
+            0, 100, GetSystemMetrics(SM_CXSCREEN), 30,
+            hwnd, NULL, NULL, NULL);
+
+        hEdit = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_PASSWORD,
+            GetSystemMetrics(SM_CXSCREEN) / 2 - 100, 150, 200, 25,
+            hwnd, (HMENU)1, NULL, NULL);
+
+        hButton = CreateWindowA("BUTTON", "解鎖", WS_CHILD | WS_VISIBLE,
+            GetSystemMetrics(SM_CXSCREEN) / 2 - 50, 200, 100, 30,
+            hwnd, (HMENU)2, NULL, NULL);
+        break;
+    }
+    case WM_COMMAND: {
+        if (LOWORD(wParam) == 2) {
+            char buf[100];
+            GetWindowTextA(hEdit, buf, 100);
+            string input = buf;
+            if (input == "0000" || input == userPassword) {
+                PostQuitMessage(0);
+            }
+            else {
+                MessageBoxA(hwnd, "密碼錯誤，請再試一次。", "錯誤", MB_ICONERROR);
+            }
+        }
+        break;
+    }
+    case WM_CLOSE:
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+    default:
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+    return 0;
+}
+
+void showLockScreen() {
+    const char g_szClassName[] = "MinecraftTimerLockClass";
+    WNDCLASSEXA wc = {};
+    wc.cbSize = sizeof(WNDCLASSEXA);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = CreateSolidBrush(RGB(40, 60, 90)); // 冷靜藍色背景
+    wc.lpszClassName = g_szClassName;
+
+    RegisterClassExA(&wc);
+
+    HWND hwnd = CreateWindowExA(
+        WS_EX_TOPMOST, g_szClassName, "⏳ 時間到！",
+        WS_POPUP | WS_VISIBLE,
+        0, 0,
+        GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+        NULL, NULL, wc.hInstance, NULL
+    );
+
+    if (hwnd == NULL) {
+        MessageBoxA(NULL, "建立視窗失敗！", "錯誤", MB_ICONERROR);
+        return;
+    }
+
+    ShowWindow(hwnd, SW_SHOWNORMAL);
+    UpdateWindow(hwnd);
+
+    MSG Msg;
+    while (GetMessageA(&Msg, NULL, 0, 0)) {
+        TranslateMessage(&Msg);
+        DispatchMessageA(&Msg);
+    }
+}
+
+void startTimer() {
+    for (int i = countdownMinutes; i > 0; --i) {
+        this_thread::sleep_for(minutes(1));
+        cout << "剩餘時間: " << i << " 分鐘" << endl;
+    }
+    showLockScreen();
+}
+
+int main() {
+    cout << "請輸入 4 位數密碼：";
+    cin >> userPassword;
+
+    if (userPassword.size() != 4) {
+        cout << "密碼必須是 4 位數。" << endl;
+        return 1;
+    }
+
+    cout << "設定計時器時間（分鐘）：";
+    cin >> countdownMinutes;
+
+    cout << "等待 Minecraft 執行中..." << endl;
+    while (!isMinecraftRunning()) {
+        this_thread::sleep_for(seconds(1));
+    }
+
+    cout << "偵測到 Minecraft，開始計時..." << endl;
+    isTimerRunning = true;
+    startTimer();
+
+    return 0;
+}
